@@ -1,0 +1,13 @@
+transformers==5.1.0
+safetensors==0.7.0
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+huggingface_hub>=0.26
+httpx>=0.27
+python-multipart>=0.0.9
+# errant/spaCy intentionally NOT installed: the model's .correct() reranks by default and its edit
+# extractor uses ERRANT when importable, else a self-contained difflib aligner — verified to suppress
+# the same over-corrections as ERRANT on the demo set. Skipping the heavy errant+spaCy+model install
+# keeps startup fast and reliable.
+# torch: install the CPU-only wheel separately (see README), the default PyPI wheel is CUDA and huge:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu

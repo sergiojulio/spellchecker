@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>English spellchecker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="site-intro">
+    <h1>English <em>spellchecker</em></h1>
+    <p class="sub">Correct English spelling and grammar with LFM2.5.</p>
+  </header>
+
+  <section class="model-strip is-loading" id="model-strip" aria-label="Model status">
+    <span class="model-logo-frame" aria-hidden="true">
+      <img id="model-logo" class="model-logo" width="56" height="59" alt="" src="lliquid.gif">
+    </span>
+    <div class="model-copy">
+      <div class="model-name-row">
+        <a href="https://huggingface.co/LiquidAI/LFM2.5-Encoder-350M-Spellchecker" target="_blank" rel="noopener">LFM2.5 Spellchecker</a>
+        <span class="model-variant">350M parameters</span>
+      </div>
+    </div>
+    <div class="load-block">
+      <div class="load-meta">
+        <span id="status" role="status" aria-live="polite">Loading model…</span>
+        <span id="load-percent">0%</span>
+      </div>
+      <div class="load-track" role="progressbar" aria-label="Model loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="load-progress"></span></div>
+    </div>
+  </section>
+
+  <main>
+    <section class="spell-workspace" id="spell-workspace" aria-label="Spellchecker">
+      <article class="workspace-card input-panel">
+        <div class="panel-header">
+          <h2>Input</h2>
+        </div>
+
+        <div class="editor-stage input-stage">
+          <label class="sr-only" for="input">Text to check</label>
+          <textarea id="input" spellcheck="false" placeholder="Write or paste text to check…"></textarea>
+          <div class="editor-scan" aria-hidden="true"></div>
+        </div>
+
+        <div class="voice-row">
+          <button type="button" id="record" class="record-button">Start Recording</button>
+          <span id="voice-status" class="voice-status" role="status"></span>
+        </div>
+
+        <div class="input-meta"><span id="count">0 characters</span><span>Checks after 650 ms</span></div>
+
+        <details class="settings-menu">
+          <summary>Advanced settings</summary>
+          <div class="settings-reveal">
+            <div class="settings-grid" aria-label="Correction settings">
+              <label class="setting-card" for="mep">
+                <span class="setting-copy"><span>Confidence threshold</span><output id="mepv" for="mep">0.00</output></span>
+                <input type="range" id="mep" min="0" max="1" step="0.05" value="0">
+                <span class="setting-scale"><span>More corrections</span><span>More precise</span></span>
+              </label>
+              <label class="setting-card" for="mit">
+                <span class="setting-copy"><span>Correction passes</span><output id="mitv" for="mit">3</output></span>
+                <input type="range" id="mit" min="1" max="5" step="1" value="3">
+                <span class="setting-scale"><span>1 pass</span><span>5 passes</span></span>
+              </label>
+            </div>
+          </div>
+        </details>
+      </article>
+
+      <article class="workspace-card output-panel">
+        <div class="panel-header output-heading">
+          <h2>Corrected</h2>
+          <div class="output-actions">
+            <button type="button" class="copy-button" id="copy" disabled>Copy</button>
+            <button type="button" class="copy-button speak-button" id="speak" disabled>Listen</button>
+          </div>
+        </div>
+
+        <div class="editor-stage output-stage" id="output-stage">
+          <div id="output" class="output-text empty" aria-live="polite" data-placeholder="Your corrected text will appear here."></div>
+          <div class="editor-scan" aria-hidden="true"></div>
+        </div>
+
+        <div class="legend" aria-label="Correction legend">
+          <span><i class="legend-swatch modified"></i>Modified</span>
+          <span><i class="legend-swatch removed"></i>Removed</span>
+        </div>
+
+        <div class="stats-grid" id="stats" aria-live="polite">
+          <div class="result-slot"><div class="activity-pill is-idle" id="activity"><span class="activity-dot" aria-hidden="true"></span><span id="activity-label">Ready</span></div></div>
+          <div class="stat-card"><span>Edits</span><strong id="stat-edits">—</strong></div>
+          <div class="stat-card"><span>Latency</span><strong id="stat-latency">—</strong></div>
+          <div class="stat-card"><span>Characters</span><strong id="stat-characters">—</strong></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="examples-panel" aria-label="Examples">
+      <span class="examples-label">Examples</span>
+      <div class="example-list" id="examples"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+{
+  const settingsMenu = document.querySelector(".settings-menu");
+  const settingsSummary = settingsMenu.querySelector("summary");
+  const settingsReveal = settingsMenu.querySelector(".settings-reveal");
+  settingsSummary.setAttribute("aria-expanded", "false");
+
+  settingsSummary.addEventListener("click", async (event) => {
+    event.preventDefault();
+    if (settingsMenu.dataset.animating === "true") return;
+
+    const opening = !settingsMenu.open;
+    const duration = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300;
+    if (!settingsReveal.animate || duration === 0) {
+      settingsMenu.open = opening;
+      settingsSummary.setAttribute("aria-expanded", String(opening));
+      return;
+    }
+
+    settingsMenu.dataset.animating = "true";
+    if (opening) settingsMenu.open = true;
+    settingsSummary.setAttribute("aria-expanded", String(opening));
+
+    const expandedHeight = settingsReveal.scrollHeight;
+    const animation = settingsReveal.animate(
+      opening
+        ? [
+            { height: "0px", opacity: 0, transform: "translateY(-6px)" },
+            { height: `${expandedHeight}px`, opacity: 1, transform: "translateY(0)" },
+          ]
+        : [
+            { height: `${settingsReveal.getBoundingClientRect().height}px`, opacity: 1, transform: "translateY(0)" },
+            { height: "0px", opacity: 0, transform: "translateY(-6px)" },
+          ],
+      { duration, easing: "cubic-bezier(.2,.8,.2,1)" },
+    );
+
+    try { await animation.finished; } catch (_) {}
+    if (!opening) settingsMenu.open = false;
+    delete settingsMenu.dataset.animating;
+  });
+}
+</script>
+
+<script>
+const EXAMPLES = [
+  { label:"Agreement", text:"Their are many reason to study hard." },
+  { label:"Verb forms", text:"I has went to the stor yesterday." },
+  { label:"Pronouns", text:"Him and me was late for the meetting." },
+  { label:"Repetition", text:"i want to go home home." },
+  { label:"Comparison", text:"He is more taller than his brother." },
+  { label:"Articles", text:"Can you give me a advice?" },
+  { label:"Clean text", text:"That's a fair point, let's discuss it tomorrow." }
+];
+
+const $ = id => document.getElementById(id);
+const input = $("input"), output = $("output"), copy = $("copy"), workspace = $("spell-workspace");
+const ATTACH_LEFT = /^[.,!?;:%)\]}»…]+$/;
+const CONTRACTION = /^(?:n['’]t|['’](?:s|re|ve|ll|d|m))$/i;
+const APOSTROPHE = /^['’]$/;
+const CONTRACTION_TAIL = /^(?:s|t|d|m|re|ve|ll)$/i;
+const OPEN = /^[(\[{«¿¡]+$/;
+const DEBOUNCE = 650;
+let timer = null, requestSequence = 0, lastCorrected = "", activeExample = null;
+
+function setModelState(kind, status, percent) {
+  const strip = $("model-strip");
+  strip.className = `model-strip is-${kind}`;
+  const value = kind === "ready" ? 100 : kind === "error" ? 100 : Math.max(0, Math.min(100, Number(percent) || 0));
+  $("status").textContent = status;
+  $("load-percent").textContent = kind === "error" ? "Error" : `${Math.round(value)}%`;
+  $("load-progress").style.width = `${value}%`;
+  strip.querySelector("[role=progressbar]").setAttribute("aria-valuenow", String(Math.round(value)));
+}
+
+function setActivity(kind, label) {
+  $("activity").className = `activity-pill is-${kind}`;
+  $("activity-label").textContent = label;
+}
+
+function setRangeFill(range) {
+  const pct = (range.value - range.min) / (range.max - range.min) * 100;
+  range.style.setProperty("--pct", `${pct}%`);
+}
+
+function updateCount() {
+  const count = input.value.length;
+  $("count").textContent = `${count} ${count === 1 ? "character" : "characters"}`;
+}
+
+function clearActiveExample() {
+  if (activeExample) activeExample.classList.remove("active");
+  activeExample = null;
+}
+
+function schedule(delay = DEBOUNCE) {
+  clearTimeout(timer);
+  timer = setTimeout(correct, delay);
+}
+
+function attachLeft(token) {
+  return ATTACH_LEFT.test(token) || CONTRACTION.test(token);
+}
+
+function needsSpace(previous, current, next) {
+  if (previous === null) return false;
+  const startsSplitContraction = APOSTROPHE.test(current) && CONTRACTION_TAIL.test(next || "");
+  const finishesSplitContraction = APOSTROPHE.test(previous) && CONTRACTION_TAIL.test(current);
+  return !attachLeft(current) && !startsSplitContraction && !finishesSplitContraction && !OPEN.test(previous);
+}
+
+function renderOutput(segments) {
+  const tokens = [];
+  for (const segment of segments) {
+    for (const token of segment.text.split(/\s+/).filter(Boolean)) tokens.push({ text:token, kind:segment.kind });
+  }
+  output.innerHTML = "";
+  output.classList.toggle("empty", tokens.length === 0);
+  let previous = null, editIndex = 0;
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (needsSpace(previous, token.text, tokens[index + 1]?.text)) output.append(document.createTextNode(" "));
+    let node;
+    if (token.kind === "edit") {
+      node = document.createElement("mark");
+      node.style.setProperty("--edit-index", editIndex++);
+      node.textContent = token.text;
+    } else if (token.kind === "del") {
+      node = document.createElement("span");
+      node.className = "deleted";
+      node.style.setProperty("--edit-index", editIndex++);
+      node.textContent = token.text;
+    } else {
+      node = document.createTextNode(token.text);
+    }
+    output.append(node);
+    previous = token.text;
+  }
+}
+
+function countEdits(segments) {
+  let edits = 0, inEdit = false;
+  for (const segment of segments) {
+    if (segment.kind === "keep") inEdit = false;
+    else if (!inEdit) { edits++; inEdit = true; }
+  }
+  return edits;
+}
+
+function resetResult() {
+  requestSequence++;
+  lastCorrected = "";
+  renderOutput([]);
+  copy.disabled = true;
+  speakBtn.disabled = true;
+  stopSpeaking();
+  setActivity("idle", "Ready");
+  workspace.classList.remove("is-checking", "is-complete");
+  $("stats").classList.remove("has-result");
+  $("stat-edits").textContent = "—";
+  $("stat-latency").textContent = "—";
+  $("stat-characters").textContent = "—";
+}
+
+async function correct() {
+  const text = input.value.replace(/\s+/g, " ").trim();
+  if (!text) { resetResult(); return; }
+  stopSpeaking();
+  const sequence = ++requestSequence;
+  const started = performance.now();
+  workspace.classList.remove("is-complete");
+  workspace.classList.add("is-checking");
+  setActivity("running", "Checking…");
+
+  try {
+    const response = await fetch("/api/correct", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({ text, min_error_prob:+$("mep").value, max_iter:+$("mit").value })
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (sequence !== requestSequence) return;
+
+    const latency = performance.now() - started;
+    const edits = countEdits(data.segments);
+    lastCorrected = data.corrected;
+    renderOutput(data.segments);
+    copy.disabled = !lastCorrected;
+    speakBtn.disabled = !lastCorrected;
+    workspace.classList.remove("is-checking");
+    void workspace.offsetWidth;
+    workspace.classList.add("is-complete");
+    setActivity("done", data.changed ? "Corrected" : "Looks good");
+
+    const stats = $("stats");
+    stats.classList.remove("has-result");
+    void stats.offsetWidth;
+    stats.classList.add("has-result");
+    $("stat-edits").textContent = String(edits);
+    $("stat-latency").textContent = `${Math.round(latency)} ms`;
+    $("stat-characters").textContent = String(text.length);
+    setTimeout(() => workspace.classList.remove("is-complete"), 1000);
+  } catch (error) {
+    if (sequence !== requestSequence) return;
+    workspace.classList.remove("is-checking");
+    setActivity("error", "Check failed");
+    console.error(error);
+  }
+}
+
+input.addEventListener("input", () => {
+  updateCount();
+  clearActiveExample();
+  schedule();
+});
+
+for (const range of [$("mep"), $("mit")]) {
+  setRangeFill(range);
+  range.addEventListener("input", event => {
+    setRangeFill(event.target);
+    $(event.target.id === "mep" ? "mepv" : "mitv").textContent = event.target.id === "mep" ? (+event.target.value).toFixed(2) : event.target.value;
+    schedule(0);
+  });
+}
+
+for (const example of EXAMPLES) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ex";
+  button.textContent = example.label;
+  button.dataset.text = example.text;
+  button.addEventListener("click", () => {
+    clearActiveExample();
+    button.classList.add("active");
+    activeExample = button;
+    input.value = example.text;
+    updateCount();
+    input.focus();
+    schedule(0);
+  });
+  $("examples").append(button);
+}
+
+copy.addEventListener("click", async () => {
+  if (!lastCorrected) return;
+  await navigator.clipboard.writeText(lastCorrected);
+  copy.textContent = "Copied";
+  copy.classList.remove("copied");
+  void copy.offsetWidth;
+  copy.classList.add("copied");
+  clearTimeout(copy._timer);
+  copy._timer = setTimeout(() => { copy.textContent = "Copy"; copy.classList.remove("copied"); }, 1200);
+});
+
+// --- Text-to-speech: read the corrected text aloud via the browser's speechSynthesis (no backend) ---
+const speakBtn = $("speak");
+const hasTTS = "speechSynthesis" in window;
+let speaking = false;
+if (!hasTTS) speakBtn.remove();
+
+function stopSpeaking() {
+  if (!hasTTS) return;
+  speechSynthesis.cancel();
+  speaking = false;
+  speakBtn.textContent = "Listen";
+  speakBtn.classList.remove("active");
+}
+
+if (hasTTS) {
+  speakBtn.addEventListener("click", () => {
+    if (speaking) { stopSpeaking(); return; }
+    if (!lastCorrected) return;
+    const utterance = new SpeechSynthesisUtterance(lastCorrected);
+    utterance.lang = "en";
+    utterance.onend = stopSpeaking;
+    utterance.onerror = stopSpeaking;
+    speechSynthesis.speak(utterance);
+    speaking = true;
+    speakBtn.textContent = "Stop";
+    speakBtn.classList.add("active");
+  });
+}
+
+// --- Voice input: record in browser -> /api/transcribe (ffmpeg + whisper via local LLM server) -> textarea ---
+const recordBtn = $("record"), voiceStatusEl = $("voice-status");
+let mediaRecorder = null, audioChunks = [], isRecording = false;
+
+function setVoiceStatus(msg, isError = false) {
+  voiceStatusEl.textContent = msg;
+  voiceStatusEl.className = isError ? "voice-status error" : "voice-status";
+}
+
+recordBtn.addEventListener("click", async () => {
+  if (isRecording) stopRecording();
+  else await startRecording();
+});
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/webm";
+
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(audioChunks, { type: mimeType });
+      await sendAudio(blob);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    recordBtn.textContent = "Stop Recording";
+    recordBtn.classList.add("recording");
+    setVoiceStatus("Recording…");
+  } catch (err) {
+    setVoiceStatus("Microphone access denied", true);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  isRecording = false;
+  recordBtn.textContent = "Start Recording";
+  recordBtn.classList.remove("recording");
+}
+
+async function sendAudio(blob) {
+  setVoiceStatus("Transcribing…");
+  recordBtn.disabled = true;
+
+  const formData = new FormData();
+  formData.append("audio", blob, "recording.webm");
+
+  try {
+    const resp = await fetch("/api/transcribe", { method: "POST", body: formData });
+    const data = await resp.json();
+    recordBtn.disabled = false;
+
+    if (!resp.ok) {
+      setVoiceStatus(data.error || "Transcription failed", true);
+      return;
+    }
+
+    // Setting textarea.value programmatically does NOT fire the "input" event, so drive the
+    // correction pipeline explicitly — same pattern as the example buttons.
+    input.value = data.text || "";
+    updateCount();
+    clearActiveExample();
+    schedule(0);
+
+    setVoiceStatus(data.text ? "Transcribed" : "No speech detected");
+  } catch (err) {
+    setVoiceStatus("Connection error", true);
+    recordBtn.disabled = false;
+  }
+}
+
+fetch("/api/health")
+  .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
+  .then(data => {
+    setModelState("ready", "Model ready", 100);
+    $("status").title = data.mem_human ? `${data.mem_human} in memory` : "";
+  })
+  .catch(() => setModelState("error", "Model unavailable", 100));
+
+(function init() {
+  const first = $("examples").querySelector(".ex");
+  first.classList.add("active");
+  activeExample = first;
+  input.value = first.dataset.text;
+  updateCount();
+  schedule(0);
+})();
+</script>
+</body>
+</html>
